@@ -1,87 +1,81 @@
-# A2A Agent Template
+# Code Translator Green Agent (Evaluator)
 
-A minimal template for building [A2A (Agent-to-Agent)](https://a2a-protocol.org/latest/) green agents compatible with the [AgentBeats](https://agentbeats.dev) platform.
+This repository contains the **Green Agent** for the Code Translator system. Built with the [Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/), this agent acts as the evaluator and orchestrator for code translation scenarios.
+
+## Overview
+
+The Green Agent is responsible for:
+1.  **Orchestrating** the interaction between participant agents (Purple Agents).
+2.  **Evaluating** the quality of code translations provided by participants.
+3.  **Scoring** the submissions based on specific criteria.
+
+### Evaluation Criteria
+The agent uses `gemini-2.5-flash` to judge translations based on:
+*   **Execution Correctness**: The code must run without errors.
+*   **Style & Documentation**: Adherence to the target language's style guides and proper commenting.
+*   **Conciseness**: Efficient code without unnecessary boilerplate.
+*   **Relevance**: Logical and structural equivalence to the original code.
+
+## Architecture
+
+*   **Framework**: Google ADK (`google-adk[a2a]`)
+*   **Model**: Gemini 2.5 Flash
+*   **Communication**: Agent-to-Agent (A2A) Protocol
+*   **Server**: Uvicorn + FastAPI (exposed via ADK)
+
+## Prerequisites
+
+*   Python 3.11+
+*   [uv](https://github.com/astral-sh/uv) (recommended) or pip
+*   Google GenAI API Key
+
+## Setup & Installation
+
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd code_translator_green_agent
+    ```
+
+2.  **Configure Environment:**
+    Create a `.env` file in the root directory:
+    ```bash
+    GOOGLE_API_KEY=your_api_key_here
+    ```
+
+3.  **Install Dependencies:**
+    Using `uv`:
+    ```bash
+    uv sync
+    ```
+
+## Running the Agent
+
+### Local Execution
+To run the agent server locally:
+
+```bash
+uv run src/server.py --host 0.0.0.0 --port 9009
+```
+
+The agent will be available at `http://localhost:9009`.
+
+### Docker Execution
+To build and run using Docker:
+
+1.  **Build the image:**
+    ```bash
+    docker build -t code-translator-green .
+    ```
+
+2.  **Run the container:**
+    ```bash
+    docker run -p 9009:9009 --env-file .env code-translator-green
+    ```
 
 ## Project Structure
 
-```
-src/
-├─ server.py      # Server setup and agent card configuration
-├─ executor.py    # A2A request handling
-├─ agent.py       # Your agent implementation goes here
-└─ messenger.py   # A2A messaging utilities
-tests/
-└─ test_agent.py  # Agent tests
-Dockerfile        # Docker configuration
-pyproject.toml    # Python dependencies
-.github/
-└─ workflows/
-   └─ test-and-publish.yml # CI workflow
-```
-
-## Getting Started
-
-1. **Create your repository** - Click "Use this template" to create your own repository from this template
-
-2. **Implement your agent** - Add your agent logic to [`src/agent.py`](src/agent.py)
-
-3. **Configure your agent card** - Fill in your agent's metadata (name, skills, description) in [`src/server.py`](src/server.py)
-
-4. **Write your tests** - Add custom tests for your agent in [`tests/test_agent.py`](tests/test_agent.py)
-
-For a concrete example of implementing a green agent using this template, see this [draft PR](https://github.com/RDI-Foundation/green-agent-template/pull/3).
-
-## Running Locally
-
-```bash
-# Install dependencies
-uv sync
-
-# Run the server
-uv run src/server.py
-```
-
-## Running with Docker
-
-```bash
-# Build the image
-docker build -t my-agent .
-
-# Run the container
-docker run -p 9009:9009 my-agent
-```
-
-## Testing
-
-Run A2A conformance tests against your agent.
-
-```bash
-# Install test dependencies
-uv sync --extra test
-
-# Start your agent (uv or docker; see above)
-
-# Run tests against your running agent URL
-uv run pytest --agent-url http://localhost:9009
-```
-
-## Publishing
-
-The repository includes a GitHub Actions workflow that automatically builds, tests, and publishes a Docker image of your agent to GitHub Container Registry.
-
-If your agent needs API keys or other secrets, add them in Settings → Secrets and variables → Actions → Repository secrets. They'll be available as environment variables during CI tests.
-
-- **Push to `main`** → publishes `latest` tag:
-```
-ghcr.io/<your-username>/<your-repo-name>:latest
-```
-
-- **Create a git tag** (e.g. `git tag v1.0.0 && git push origin v1.0.0`) → publishes version tags:
-```
-ghcr.io/<your-username>/<your-repo-name>:1.0.0
-ghcr.io/<your-username>/<your-repo-name>:1
-```
-
-Once the workflow completes, find your Docker image in the Packages section (right sidebar of your repository). Configure the package visibility in package settings.
-
-> **Note:** Organization repositories may need package write permissions enabled manually (Settings → Actions → General). Version tags must follow [semantic versioning](https://semver.org/) (e.g., `v1.0.0`).
+*   `src/agent.py`: Defines the ADK Agent, system prompt, and evaluation logic.
+*   `src/server.py`: Entry point for the HTTP server.
+*   `src/tool_provider.py`: Tools for the agent (e.g., A2A communication).
+*   `src/common.py`: Shared data models (e.g., `TranslatorEval` schema).
