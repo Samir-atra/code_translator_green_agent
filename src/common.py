@@ -12,8 +12,11 @@ class ParticipantScore(BaseModel):
 
 class TranslatorEval(BaseModel):
     reasoning: str = Field(description="The reasoning behind the evaluation.")
-    winner: str = Field(description="The role of the winning agent (e.g., 'researcher_translator').")
-    scores: List[ParticipantScore] = Field(description="Scores for each participant (0-10).")
+    execution_correctness: float = Field(description="Score for execution correctness (0-10).")
+    style_score: float = Field(description="Score for style and documentation (0-10).")
+    conciseness: float = Field(description="Score for conciseness (0-10).")
+    relevance: float = Field(description="Score for relevance (0-10).")
+    winner: str = Field(description="The role of the winning agent (e.g., 'researcher_translator') or 'N/A'.")
 
 def translator_judge_agent_card(name: str, url: str):
     return AgentCard(

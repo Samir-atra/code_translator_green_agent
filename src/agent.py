@@ -46,8 +46,8 @@ class TranslationGreenAgent(GreenAgent):
             return False, "No participants provided in the evaluation request."
         if len(request.participants) > 1:
             return False, "Only one participant is supported per evaluation."
-        if "code_to_translate" not in request.config:
-            return False, "Missing 'code_to_translate' in config."
+        if "code_to_translate" not in request.config and "test_cases" not in request.config:
+            return False, "Missing 'code_to_translate' or 'test_cases' in config."
         if "source_language" not in request.config:
             return False, "Missing 'source_language' in config."
         if "target_language" not in request.config:
@@ -57,47 +57,76 @@ class TranslationGreenAgent(GreenAgent):
     async def run_eval(self, request: EvalRequest, updater: TaskUpdater) -> None:
         # Extract the single participant
         role, endpoint = next(iter(request.participants.items()))
-        code_to_translate = request.config["code_to_translate"]
+        
+        # Determine inputs: support both single 'code_to_translate' and list 'test_cases'
+        code_inputs = []
+        if "test_cases" in request.config and isinstance(request.config["test_cases"], list):
+             code_inputs = request.config["test_cases"]
+        elif "code_to_translate" in request.config:
+             code_inputs = [request.config["code_to_translate"]]
+        
         source_language = request.config["source_language"]
         target_language = request.config["target_language"]
-
-        # Step 1: Request translation from the participant agent
-        await updater.update_status(
-            "working",
-            new_agent_text_message(f"Requesting translation from participant '{role}'...")
-        )
-        try:
-            # Send the code to translate to the participant agent
-            print(f"[DEBUG] Sending message to Purple Agent at {endpoint}", flush=True)
-            response = await self._tool_provider.talk_to_agent(
-                url=endpoint,
-                message=json.dumps({
-                    "code_to_translate": code_to_translate,
-                    "source_language": source_language,
-                    "target_language": target_language
-                })
+        
+        evaluations = []
+        
+        for i, code_to_translate in enumerate(code_inputs):
+            case_label = f"Case {i+1}/{len(code_inputs)}"
+            await updater.update_status(
+                "working", 
+                new_agent_text_message(f"Processing {case_label} with participant '{role}'...")
             )
-            print(f"[DEBUG] Received response from Purple Agent: '{response}'", flush=True)
-            # The response is expected to be a JSON string with the translated code
-            translated_code_data = json.loads(response)
-            translated_code = translated_code_data.get("translated_code", "")
+            
+            # --- TRANSLATION STEP ---
+            try:
+                print(f"[DEBUG] Sending {case_label} to Purple Agent at {endpoint}", flush=True)
+                response = await self._tool_provider.talk_to_agent(
+                    url=endpoint,
+                    message=json.dumps({
+                        "code_to_translate": code_to_translate,
+                        "source_language": source_language,
+                        "target_language": target_language
+                    })
+                )
+                print(f"[DEBUG] Received response for {case_label}: '{response}'", flush=True)
 
-            if not translated_code:
-                await updater.failed(new_agent_text_message("Participant did not return translated code."))
-                return
+                translated_code = None
+                # Attempt 1: JSON
+                try:
+                    data = json.loads(response)
+                    if isinstance(data, dict):
+                        translated_code = data.get("translated_code") or data.get("code") or data.get("content") or data.get("message")
+                    elif isinstance(data, str):
+                        translated_code = data
+                except json.JSONDecodeError:
+                    pass
 
-        except Exception as e:
-            print(f"[DEBUG] Exception communicating with participant: {e}", flush=True)
-            await updater.failed(new_agent_text_message(f"Error communicating with participant: {e}"))
-            return
+                # Attempt 2: Markdown
+                if not translated_code:
+                    import re
+                    matches = re.findall(r"```(?:\w+)?\n(.*?)```", response, re.DOTALL)
+                    if matches:
+                        translated_code = max(matches, key=len).strip()
+                
+                # Attempt 3: Raw
+                if not translated_code:
+                    translated_code = response.strip()
 
-        await updater.update_status(
-            "working",
-            new_agent_text_message("Received translated code. Evaluating...")
-        )
+                if not translated_code:
+                     print(f"[WARN] Empty response for {case_label}")
+                     translated_code = "// Error: No Code Translated"
+                
+            except Exception as e:
+                print(f"[ERROR] Communication failed for {case_label}: {e}")
+                translated_code = f"// Error: Communication failed: {e}"
 
-        # Step 2: Use the judge agent to evaluate the translated code
-        prompt = f"""
+            # --- EVALUATION STEP ---
+            await updater.update_status(
+                "working",
+                new_agent_text_message(f"Evaluating {case_label}...")
+            )
+
+            prompt = f"""
 {SYSTEM_PROMPT}
 
 Please evaluate the following code translation based on the criteria:
@@ -116,59 +145,81 @@ Translated {target_language} code (from participant '{role}'):
 {translated_code}
 ```
 
-Provide your evaluation in the TranslatorEval schema, including reasoning, winner (the participant's role if it's a good translation, or 'N/A' otherwise), and scores.
+Provide your evaluation in the TranslatorEval schema, including reasoning, winner (participant's role or 'N/A'), execution_correctness, style_score, conciseness, and relevance.
 """
-        models_to_try = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemma-3-27b-it",
-            "gemma-3-12b-it",
-            "gemini-flash-latest",
-            "gemini-pro-latest",
-            "gemini-2.5-pro"
-        ]
-        
-        last_error = None
-        for model in models_to_try:
-            try:
-                print(f"[DEBUG] Trying evaluation with model: {model}")
-                response = await self.client.aio.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type='application/json',
-                        response_schema=TranslatorEval
+            models_to_try = [
+                "gemini-2.5-flash", 
+                "gemini-2.0-flash", 
+                "gemma-3-27b-it",
+                "gemini-flash-latest"
+            ]
+            
+            case_eval = None
+            for model in models_to_try:
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type='application/json',
+                            response_schema=TranslatorEval
+                        )
                     )
+                    case_eval = response.parsed
+                    if case_eval:
+                        break
+                except Exception as e:
+                    print(f"[DEBUG] Model {model} failed for {case_label}: {e}")
+                    if "429" in str(e):
+                        import asyncio
+                        await asyncio.sleep(5)
+            
+            if not case_eval:
+                # Fallback if evaluation fails
+                case_eval = TranslatorEval(
+                    reasoning=f"Evaluation failed for {case_label}",
+                    winner="N/A",
+                    execution_correctness=0,
+                    style_score=0,
+                    conciseness=0,
+                    relevance=0
                 )
-                eval_result: TranslatorEval = response.parsed
-                
-                # If parsed is None (should not happen with structured output)
-                if not eval_result:
-                     raise ValueError("Model failed to return structured output")
-    
-                # import json removed since it's global
-                # from a2a.types import Part, DataPart moved to global (or just imported here)
+            
+            evaluations.append(case_eval)
 
-                await updater.add_artifact(
-                   parts=[Part(root=DataPart(data=eval_result.model_dump()))],
-                   name="Evaluation Result"
-                )
-                
-                await updater.update_status(
-                    "completed",
-                    new_agent_text_message(f"Evaluation complete. Winner: {eval_result.winner}, Scores: {eval_result.scores}")
-                )
-                return # Assessment successful, exit function
+        # --- AGGREGATION STEP ---
+        count = len(evaluations)
+        if count == 0:
+             await updater.failed(new_agent_text_message("No evaluations occurred."))
+             return
 
-            except Exception as e:
-                print(f"[DEBUG] Model {model} failed: {e}")
-                last_error = e
-                # Check for resource exhausted and wait if needed
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    print("[DEBUG] Quota exhausted. Waiting 30 seconds before trying next model...", flush=True)
-                    import asyncio
-                    await asyncio.sleep(30)
-                # Continue to next model
+        avg_exec = sum(e.execution_correctness for e in evaluations) / count
+        avg_style = sum(e.style_score for e in evaluations) / count
+        avg_conciseness = sum(e.conciseness for e in evaluations) / count
+        avg_relevance = sum(e.relevance for e in evaluations) / count
         
-        # If all models failed
-        await updater.failed(new_agent_text_message(f"All evaluation models failed. Last error: {last_error}"))
+        combined_reasoning = "\n\n".join([f"[{i+1}/{count}] Winner: {e.winner}. {e.reasoning}" for i, e in enumerate(evaluations)])
+        
+        # Determine overall winner (majority wins or high score?)
+        # For simplicity, if we have a winner in >50% cases, we propagate that, else N/A
+        winners = [e.winner for e in evaluations if e.winner != "N/A"]
+        overall_winner = max(set(winners), key=winners.count) if winners else "N/A"
+
+        final_result = TranslatorEval(
+            reasoning=f"Aggregated Score across {count} test cases.\n\nDetails:\n{combined_reasoning}",
+            winner=overall_winner,
+            execution_correctness=round(avg_exec, 2),
+            style_score=round(avg_style, 2),
+            conciseness=round(avg_conciseness, 2),
+            relevance=round(avg_relevance, 2)
+        )
+
+        await updater.add_artifact(
+           parts=[Part(root=DataPart(data=final_result.model_dump()))],
+           name="Evaluation Result"
+        )
+        
+        await updater.update_status(
+            "completed",
+            new_agent_text_message(f"Evaluation complete. Winner: {final_result.winner}, Execution: {final_result.execution_correctness}, Style: {final_result.style_score}, Conciseness: {final_result.conciseness}, Relevance: {final_result.relevance}")
+        )
