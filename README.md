@@ -1,81 +1,144 @@
-# Code Translator Green Agent (Evaluator)
+# Code Translator Green Agent (Judge)
 
-This repository contains the **Green Agent** for the Code Translator system. Built with the [Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/), this agent acts as the evaluator and orchestrator for code translation scenarios.
+This repository contains the implementation of the **Green Agent**, a judge agent designed for the Code Translator competition. Its primary role is to evaluate code translations performed by other agents (specifically the **Purple Agent**).
 
 ## Overview
 
-The Green Agent is responsible for:
-1.  **Orchestrating** the interaction between participant agents (Purple Agents).
-2.  **Evaluating** the quality of code translations provided by participants.
-3.  **Scoring** the submissions based on specific criteria.
+The Green Agent acts as an orchestrator and evaluator. When it receives a request to evaluate a code translation task:
+1.  **Orchestration**: It requests the **Purple Agent** (Participant) to translate a given snippet of code from a source language to a target language.
+2.  **Evaluation**: Upon receiving the translation, it uses **Google GenAI (Gemini)** to act as a judge. The judge evaluates the translation based on executing correctness, style, conciseness, and relevance.
+3.  **Reporting**: It returns a structured evaluation containing scores, reasoning, and a winner determination.
 
-### Evaluation Criteria
-The agent uses `gemini-2.5-flash` to judge translations based on:
-*   **Execution Correctness**: The code must run without errors.
-*   **Style & Documentation**: Adherence to the target language's style guides and proper commenting.
-*   **Conciseness**: Efficient code without unnecessary boilerplate.
-*   **Relevance**: Logical and structural equivalence to the original code.
+## Repository Structure
 
-## Architecture
+-   **`src/`**: Source code for the agent.
+    -   **`agent.py`**: Contains `TranslationGreenAgent`. This is the core logic that handles the evaluation workflow: validating requests, communicating with the participant agent, and invoking the Gemini model for judging.
+    -   **`server.py`**: The entry point for the application. It initializes the `TranslationGreenAgent`, wraps it in a `GreenExecutor`, and sets up the **A2A (Agent-to-Agent)** Starlette server.
+    -   **`common.py`**: Defines shared data structures and Pydantic models (e.g., `EvalRequest`, `TranslatorEval`) and the Agent Card configuration.
+    -   **`executor.py`**: Handles the execution context for the agent, providing the sandbox or environment for running the agent logic.
+    -   **`tool_provider.py`**: Provides utilities for the agent to interact with external services or other agents (e.g., `talk_to_agent` implementation).
+    -   **`client.py`**: Client-side utilities or helpers for interacting with the agent.
+-   **`tests/`**: Test suite.
+    -   **`test_agent.py`**: Contains integration tests and A2A conformance tests to ensure the agent behaves correctly, validates schemas, and adheres to the protocol.
+    -   **`conftest.py`**: Pytest configuration and fixtures.
+-   **`Dockerfile`**: Configuration to containerize the application for deployment.
+-   **`pyproject.toml`**: Project configuration and dependencies.
 
-*   **Framework**: Google ADK (`google-adk[a2a]`)
-*   **Model**: Gemini 2.5 Flash
-*   **Communication**: Agent-to-Agent (A2A) Protocol
-*   **Server**: Uvicorn + FastAPI (exposed via ADK)
+## Setup & Setup
 
-## Prerequisites
+### Prerequisites
 
-*   Python 3.11+
-*   [uv](https://github.com/astral-sh/uv) (recommended) or pip
-*   Google GenAI API Key
+-   Python 3.11+
+-   A **Google GenAI API Key** (Gemini)
+-   (Optional) Docker
 
-## Setup & Installation
+### Installation
 
-1.  **Clone the repository:**
+1.  **Clone the repository**:
     ```bash
     git clone <repository-url>
     cd code_translator_green_agent
     ```
 
-2.  **Configure Environment:**
-    Create a `.env` file in the root directory:
+2.  **Create a virtual environment** (optional but recommended):
     ```bash
-    GOOGLE_API_KEY=your_api_key_here
+    python -m venv .venv
+    source .venv/bin/activate
     ```
 
-3.  **Install Dependencies:**
-    Using `uv`:
+3.  **Install dependencies**:
     ```bash
-    uv sync
+    pip install .
+    # Or install specific requirements
+    pip install python-dotenv uvicorn httpx google-genai pydantic "google-adk[a2a]"
+    ```
+    
+4.  **Environment Variables**:
+    Create a `.env` file in the root directory (or ensure relevant environment variables are set) containing your Google API key:
+    ```env
+    GOOGLE_API_KEY=your_google_api_key_here
     ```
 
 ## Running the Agent
 
-### Local Execution
-To run the agent server locally:
+### Locally
+
+To start the agent server:
 
 ```bash
-uv run src/server.py --host 0.0.0.0 --port 9009
+python src/server.py
 ```
 
-The agent will be available at `http://localhost:9009`.
+By default, the server runs on `http://127.0.0.1:9009`.
+You can customize the host and port using arguments:
 
-### Docker Execution
-To build and run using Docker:
+```bash
+python src/server.py --host 0.0.0.0 --port 8080
+```
 
-1.  **Build the image:**
+### Using Docker
+
+1.  **Build the image**:
     ```bash
-    docker build -t code-translator-green .
+    docker build -t green-agent .
     ```
 
-2.  **Run the container:**
+2.  **Run the container**:
     ```bash
-    docker run -p 9009:9009 --env-file .env code-translator-green
+    docker run -p 9009:9009 --env GOOGLE_API_KEY=your_api_key green-agent
     ```
 
-## Project Structure
+## Usage as a Judge
 
-*   `src/agent.py`: Defines the ADK Agent, system prompt, and evaluation logic.
-*   `src/server.py`: Entry point for the HTTP server.
-*   `src/tool_provider.py`: Tools for the agent (e.g., A2A communication).
-*   `src/common.py`: Shared data models (e.g., `TranslatorEval` schema).
+The agent is designed to be called by an orchestration layer or directly via A2A protocol. It expects a JSON payload (Evaluator Request) with the following structure:
+
+```json
+{
+  "participants": {
+    "researcher_translator": "http://url-to-purple-agent"
+  },
+  "config": {
+    "code_to_translate": "print('Hello World')",
+    "source_language": "python",
+    "target_language": "javascript"
+  }
+}
+```
+
+**The Workflow:**
+1.  The Green Agent contacts the participant agent at the provided URL (`http://url-to-purple-agent`).
+2.  It sends the `code_to_translate`, `source_language`, and `target_language` to the participant.
+3.  It waits for the participant to return the translated code.
+4.  Once received, the Green Agent constructs a prompt for the Gemini model (Judge), instructing it to evaluate the translation.
+5.  It returns a result resembling:
+
+```json
+{
+  "winner": "researcher_translator",
+  "scores": [
+    {
+      "participant": "researcher_translator",
+      "score": 9
+    }
+  ],
+  "reasoning": "The translation is syntactically correct and preserves functionality..."
+}
+```
+
+## Testing
+
+To ensure the agent is functioning correctly, you can run the provided tests.
+
+1.  **Install test dependencies** (if not already installed):
+    ```bash
+    pip install pytest pytest-asyncio
+    ```
+
+2.  **Run tests**:
+    ```bash
+    pytest tests/
+    ```
+
+    The `test_agent.py` contains:
+    -   **Conformance Tests**: Verifies the Agent Card and A2A protocol structure (e.g., proper message formats, capabilities).
+    -   **Message Validation**: Ensures that request and response payloads adhere to the defined schemas.

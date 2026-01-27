@@ -33,15 +33,19 @@ class GreenAgent:
 class GreenExecutor(AgentExecutor):
     def __init__(self, green_agent: GreenAgent):
         self.agent = green_agent
+        self.name = "GreenExecutor"
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         request_text = context.get_user_input()
+        print(f"[DEBUG] Received request_text: {request_text}", flush=True)
         try:
             req: EvalRequest = EvalRequest.model_validate_json(request_text)
+            print(f"[DEBUG] Parsed EvalRequest: {req}", flush=True)
             ok, msg = self.agent.validate_request(req)
             if not ok:
                 raise ServerError(error=InvalidParamsError(message=msg))
         except ValidationError as e:
+            print(f"[DEBUG] Validation error: {e.json()}", flush=True)
             raise ServerError(error=InvalidParamsError(message=e.json()))
 
         msg = context.message
@@ -59,7 +63,6 @@ class GreenExecutor(AgentExecutor):
 
         try:
             await self.agent.run_eval(req, updater)
-            await updater.complete()
         except Exception as e:
             await updater.failed(new_agent_text_message(f"Agent error: {e}", context_id=context.context_id))
             raise ServerError(error=InternalError(message=str(e)))

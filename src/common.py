@@ -2,18 +2,18 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 from a2a.types import AgentCard, AgentSkill, AgentCapabilities
 
-class Participant(BaseModel):
-    role: str
-    endpoint: str
-
 class EvalRequest(BaseModel):
-    participants: List[Participant]
+    participants: Dict[str, str]
     config: Dict[str, Any]
+
+class ParticipantScore(BaseModel):
+    participant: str
+    score: int
 
 class TranslatorEval(BaseModel):
     reasoning: str = Field(description="The reasoning behind the evaluation.")
     winner: str = Field(description="The role of the winning agent (e.g., 'researcher_translator').")
-    scores: Dict[str, int] = Field(description="Scores for each participant (0-10).")
+    scores: List[ParticipantScore] = Field(description="Scores for each participant (0-10).")
 
 def translator_judge_agent_card(name: str, url: str):
     return AgentCard(

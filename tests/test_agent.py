@@ -174,7 +174,16 @@ def test_agent_card(agent):
 @pytest.mark.parametrize("streaming", [True, False])
 async def test_message(agent, streaming):
     """Test that agent returns valid A2A message format."""
-    events = await send_text_message("Hello", agent, streaming=streaming)
+    import json
+    payload = json.dumps({
+        "participants": {"researcher": "http://localhost:54321"},
+        "config": {
+            "code_to_translate": "print('hello')",
+            "source_language": "python",
+            "target_language": "javascript"
+        }
+    })
+    events = await send_text_message(payload, agent, streaming=streaming)
 
     all_errors = []
     for event in events:
