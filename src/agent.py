@@ -10,6 +10,7 @@ import json
 import os
 from google import genai
 from google.genai import types
+from a2a.types import Part, DataPart
 
 SYSTEM_PROMPT = '''
 you are an expert evaluation agent specialized in evaluating code and programming languages translation and
@@ -120,6 +121,8 @@ Provide your evaluation in the TranslatorEval schema, including reasoning, winne
         models_to_try = [
             "gemini-2.5-flash",
             "gemini-2.0-flash",
+            "gemma-3-27b-it",
+            "gemma-3-12b-it",
             "gemini-flash-latest",
             "gemini-pro-latest",
             "gemini-2.5-pro"
@@ -143,12 +146,18 @@ Provide your evaluation in the TranslatorEval schema, including reasoning, winne
                 if not eval_result:
                      raise ValueError("Model failed to return structured output")
     
+                # import json removed since it's global
+                # from a2a.types import Part, DataPart moved to global (or just imported here)
+
+                await updater.add_artifact(
+                   parts=[Part(root=DataPart(data=eval_result.model_dump()))],
+                   name="Evaluation Result"
+                )
+                
                 await updater.update_status(
                     "completed",
                     new_agent_text_message(f"Evaluation complete. Winner: {eval_result.winner}, Scores: {eval_result.scores}")
                 )
-                # You might want to store the full eval_result or just the scores in the task result
-                await updater.update_result(eval_result.model_dump())
                 return # Assessment successful, exit function
 
             except Exception as e:
