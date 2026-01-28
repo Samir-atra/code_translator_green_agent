@@ -147,25 +147,72 @@ Translated {target_language} code (from participant '{role}'):
 
 Provide your evaluation in the TranslatorEval schema, including reasoning, winner (participant's role or 'N/A'), execution_correctness, style_score, conciseness, and relevance.
 """
-            models_to_try = [
-                "gemini-2.5-flash", 
-                "gemini-2.0-flash", 
-                "gemma-3-27b-it",
-                "gemini-flash-latest"
+            # Models that support JSON mode with schema (ordered by preference)
+            json_supported_models = [
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash-001",
+                "gemini-2.0-flash-lite-001",
+                "gemini-flash-latest",
+                "gemini-flash-lite-latest",
+                "gemini-pro-latest",
+                "gemini-2.5-pro",
+                "gemini-exp-1206",
+                "gemini-3-flash-preview",
+                "gemini-3-pro-preview"
             ]
+            
+            # Text-only models (Gemma and experimental) - use text mode and parse manually
+            text_only_models = [
+                "gemma-3-1b-it",
+                "gemma-3-4b-it",
+                "gemma-3-12b-it",
+                "gemma-3-27b-it",
+                "gemma-3n-e2b-it",
+                "gemma-3n-e4b-it"
+            ]
+            
+            models_to_try = json_supported_models + text_only_models
             
             case_eval = None
             for model in models_to_try:
                 try:
-                    response = await self.client.aio.models.generate_content(
-                        model=model,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type='application/json',
-                            response_schema=TranslatorEval
+                    use_json_mode = model in json_supported_models
+                    
+                    if use_json_mode:
+                        response = await self.client.aio.models.generate_content(
+                            model=model,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                response_mime_type='application/json',
+                                response_schema=TranslatorEval
+                            )
                         )
-                    )
-                    case_eval = response.parsed
+                        case_eval = response.parsed
+                    else:
+                        # For Gemma models - use text mode and parse manually
+                        response = await self.client.aio.models.generate_content(
+                            model=model,
+                            contents=prompt
+                        )
+                        response_text = response.text
+                        
+                        # Try to parse JSON from response
+                        import re
+                        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+                        if json_match:
+                            data = json.loads(json_match.group(0))
+                            case_eval = TranslatorEval(
+                                reasoning=data.get("reasoning", "Evaluated by Gemma model"),
+                                winner=data.get("winner", role),
+                                execution_correctness=float(data.get("execution_correctness", 5)),
+                                style_score=float(data.get("style_score", 5)),
+                                conciseness=float(data.get("conciseness", 5)),
+                                relevance=float(data.get("relevance", 5))
+                            )
+                    
                     if case_eval:
                         break
                 except Exception as e:
