@@ -95,7 +95,7 @@ The agent is designed to be called by an orchestration layer or directly via A2A
 ```json
 {
   "participants": {
-    "researcher_translator": "http://url-to-purple-agent"
+    "translator": "http://url-to-purple-agent"
   },
   "config": {
     "code_to_translate": "print('Hello World')",
@@ -110,24 +110,42 @@ The agent is designed to be called by an orchestration layer or directly via A2A
 2.  It sends the `code_to_translate`, `source_language`, and `target_language` to the participant.
 3.  It waits for the participant to return the translated code.
 4.  Once received, the Green Agent constructs a prompt for the Gemini model (Judge), instructing it to evaluate the translation.
-5.  It returns a result resembling:
+5.  It returns a result that is saved to the leaderboard in the following format:
 
 ```json
 {
-  "winner": "researcher_translator",
-  "scores": [
+  "participants": {
+    "translator": "019b8933-d5b6-76a3-8e0b-930c19c10e87"
+  },
+  "results": [
     {
-      "participant": "researcher_translator",
-      "score": 9
+      "winner": "translator",
+      "execution_correctness": 10.0,
+      "style_score": 9.0,
+      "conciseness": 9.33,
+      "relevance": 10.0,
+      "overall_score": 9.58,
+      "reasoning": "The JavaScript translation successfully replicates the functionality of the Python code..."
     }
-  ],
-  "reasoning": "The translation is syntactically correct and preserves functionality..."
+  ]
 }
 ```
+
+### Evaluation Metrics
+
+| Metric | Description | Score Range |
+|--------|-------------|-------------|
+| **Execution Correctness** | Does the translated code produce the same output/behavior? | 0-10 |
+| **Style Score** | Does the code follow idiomatic conventions of the target language? | 0-10 |
+| **Conciseness** | Is the translation efficient without unnecessary verbosity? | 0-10 |
+| **Relevance** | Does the translation preserve the original code's intent and logic? | 0-10 |
+| **Overall Score** | Average of all four metrics | 0-10 |
 
 ## Testing
 
 To ensure the agent is functioning correctly, you can run the provided tests.
+
+### Unit Tests
 
 1.  **Install test dependencies** (if not already installed):
     ```bash
@@ -136,9 +154,63 @@ To ensure the agent is functioning correctly, you can run the provided tests.
 
 2.  **Run tests**:
     ```bash
-    pytest tests/
+    pytest tests/test_agent.py
     ```
 
     The `test_agent.py` contains:
     -   **Conformance Tests**: Verifies the Agent Card and A2A protocol structure (e.g., proper message formats, capabilities).
     -   **Message Validation**: Ensures that request and response payloads adhere to the defined schemas.
+
+### Integration Test
+
+The `run_integration_test.py` script tests the full pipeline between the Green Agent (Judge) and Purple Agent (Participant):
+
+```bash
+python tests/run_integration_test.py
+```
+
+This script:
+1. Starts both agents locally
+2. Sends a code translation request to the Green Agent
+3. The Green Agent communicates with the Purple Agent
+4. Returns the evaluation result
+
+### Leaderboard Test
+
+The `run_leaderboard_test.py` script runs a full evaluation and generates a result JSON file compatible with the AgentBeats leaderboard:
+
+```bash
+python tests/run_leaderboard_test.py
+```
+
+This script:
+1. Starts both agents locally
+2. Sends multiple test cases for evaluation
+3. Aggregates the scores
+4. Generates a JSON file in the `results/` directory in the correct format for the leaderboard
+
+## Related Repositories
+
+This project is part of the **Code Translator** multi-agent evaluation system built for the [AgentBeats Competition](https://rdi.berkeley.edu/agentx-agentbeats.html). The complete system consists of:
+
+| Repository | Description |
+|------------|-------------|
+| **[Code Translator Green Agent](https://github.com/Samir-atra/code_translator_green_agent)** (this repo) | The Judge agent that evaluates code translations |
+| **[Code Translator Purple Agent](https://github.com/Samir-atra/code_translator_purple_agent)** | The participant agent that performs code translation |
+| **[Code Translator Leaderboard](https://github.com/Samir-atra/code_translator_leaderboard)** | The leaderboard repository that records evaluation results |
+
+### Live Leaderboard
+
+View the live leaderboard at: **[AgentBeats - Code Translator Judge](https://agentbeats.dev/Samir-atra/code-translator-judge)**
+
+### Docker Images
+
+- **Green Agent**: `docker.io/samiratra95/code-translator-green-agent:latest`
+- **Purple Agent**: `docker.io/samiratra95/code-translator-purple-agent:latest`
+
+## References
+
+- [AgentBeats Tutorial](https://github.com/RDI-Foundation/agentbeats-tutorial) - Official tutorial for building AgentBeats agents
+- [Green Agent Template](https://github.com/RDI-Foundation/green-agent-template) - Template for green (judge) agents
+- [Agent Template](https://github.com/RDI-Foundation/agent-template) - Template for purple (participant) agents
+- [Leaderboard Template](https://github.com/RDI-Foundation/agentbeats-leaderboard-template) - Template for leaderboard repositories
